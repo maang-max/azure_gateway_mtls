@@ -1,253 +1,304 @@
-<p><strong>1.What is mTLS?</strong></p>
-<p><strong>2.The certificates for mTLS?</strong></p>
-<p><strong>3.Create OpenSSL Root CA</strong></p>
-<p><strong>4.Generate the root CA Certificate</strong></p>
-<p><strong>5.Generate the intermediate CA key pair and certificate</strong></p>
-<p><strong>6.Generate and sign server certificate using Intermediate CA</strong></p>
-<p><strong>7.Signing and Revoking a certificate using Intermediate CA</strong></p>
-<p><strong>8.Conclusion</strong></p>
-<h1 id="-1-what-is-mtls-"><strong>1.What is mTLS?</strong></h1>
-<p>mTLS is called mutual TLS or TLS mutual authentication.</p>
-<p>TLS is a protocol for encryption used when communicating over a network. </p>
-<p>TLS consists of PKI (Public Key Infrastructure) and X.509 certificates. X.509 is a standard certificate format and is used in TLS/SSL, which is the backbone of https. It is used not only online but also offline for electronic signatures and other purposes. X.509 consists of a public key and several identities (host name, organizational information, etc.), and is signed by itself or by a certificate authority.</p>
-<p>By default, TLS is only used by the client to verify the identity of the server, so the mechanism for the server to verify the client had to be implemented on the application side</p>
-<p>Therefore, mTLS has come to be used as a mechanism for server and client to authenticate each other in business applications that have higher security requirements than consumer web services.</p>
-<p><strong>2.The certificates for mTLS?</strong></p>
-<p>Azure Gateway require chain certificate Root CA and Intermediate certificate.</p>
-<p>Create root and intermediate certificates and then use these certificates to create certificate CA bundle in Linux.</p>
-<p>Root certificate and Intermediate certificate</p>
-<ul>
-<li>A certificate chain or certificate CA bundle is a sequence of certificates, where each certificate in the chain is signed by the subsequent certificate.</li>
-<li>The Root CA is the top level of certificate chain while intermediate CAs or Sub CAs are Certificate Authorities that issue off an intermediate root.</li>
-<li>Typically, the root CA does not sign server or client certificates directly.</li>
-<li>The root CA is only ever used to create one or more intermediate CAs, which are trusted by the root CA to sign certificates on their behalf</li>
-<li>It allows the root key to be kept offline and unused as much as possible, as any compromise of the root key is disastrous.</li>
-<li>An intermediate certificate authority (CA) is an entity that can sign certificates on behalf of the root CA.</li>
-<li>The root CA signs the intermediate certificate, forming a chain of trust.</li>
-<li>The purpose of using an intermediate CA is primarily for security.</li>
-<li>If the intermediate key is compromised, the root CA can revoke the intermediate certificate and create a new intermediate cryptographic pair.</li>
-</ul>
-<p><strong>3.Create OpenSSL Root CA</strong></p>
-<p>We will create a new directory structure /root/myCA/ to store our certificates.</p>
-<pre><code>mkdir -p ~/myCA/rootCA/{certs,crl,<span class="hljs-keyword">new</span><span class="hljs-type">certs</span>,<span class="hljs-keyword">private</span>,csr}
-mkdir -p ~/myCA/intermediateCA/{certs,crl,<span class="hljs-keyword">new</span><span class="hljs-type">certs</span>,<span class="hljs-keyword">private</span>,csr}
-</code></pre><p>A serial file is used to keep track of the last serial number that was used to issue a certificate. </p>
-<pre><code><span class="hljs-built_in">echo</span> 1000 &gt; ~/myCA/rootCA/serial
-<span class="hljs-built_in">echo</span> 1000 &gt; ~/myCA/intermediateCA/serial
-</code></pre><p>The CRL number is a unique integer that is incremented each time a new Certificate Revocation List (CRL) is generated. </p>
-<pre><code><span class="hljs-keyword">touch</span> ~/myCA/rootCA/<span class="hljs-built_in">index</span>.txt
-<span class="hljs-keyword">touch</span> ~/myCA/intermediateCA/<span class="hljs-built_in">index</span>.txt
-</code></pre><p>Create  openssl_root.cnf /etc/ssl folder</p>
-<pre><code>[ ca ]                                                   <span class="hljs-comment"># The default CA section</span>
-<span class="hljs-attr">default_ca</span> = CA_default                                  <span class="hljs-comment"># The default CA name</span>
+1.What is mTLS?
 
-[ CA_default ]                                           <span class="hljs-comment"># Default settings for the CA</span>
-<span class="hljs-attr">dir</span>               = /root/myCA/rootCA                    <span class="hljs-comment"># CA directory</span>
-<span class="hljs-attr">certs</span>             = $dir/certs                           <span class="hljs-comment"># Certificates directory</span>
-<span class="hljs-attr">crl_dir</span>           = $dir/crl                             <span class="hljs-comment"># CRL directory</span>
-<span class="hljs-attr">new_certs_dir</span>     = $dir/newcerts                        <span class="hljs-comment"># New certificates directory</span>
-<span class="hljs-attr">database</span>          = $dir/index.txt                       <span class="hljs-comment"># Certificate index file</span>
-<span class="hljs-attr">serial</span>            = $dir/serial                          <span class="hljs-comment"># Serial number file</span>
-<span class="hljs-attr">RANDFILE</span>          = $dir/private/.rand                   <span class="hljs-comment"># Random number file</span>
-<span class="hljs-attr">private_key</span>       = $dir/private/ca.key.pem              <span class="hljs-comment"># Root CA private key</span>
-<span class="hljs-attr">certificate</span>       = $dir/certs/ca.cert.pem               <span class="hljs-comment"># Root CA certificate</span>
-<span class="hljs-attr">crl</span>               = $dir/crl/ca.crl.pem                  <span class="hljs-comment"># Root CA CRL</span>
-<span class="hljs-attr">crlnumber</span>         = $dir/crlnumber                       <span class="hljs-comment"># Root CA CRL number</span>
-<span class="hljs-attr">crl_extensions</span>    = crl_ext                              <span class="hljs-comment"># CRL extensions</span>
-<span class="hljs-attr">default_crl_days</span>  = <span class="hljs-number">30</span>                                   <span class="hljs-comment"># Default CRL validity days</span>
-<span class="hljs-attr">default_md</span>        = sha256                               <span class="hljs-comment"># Default message digest</span>
-<span class="hljs-attr">preserve</span>          = no                                   <span class="hljs-comment"># Preserve existing extensions</span>
-<span class="hljs-attr">email_in_dn</span>       = no                                   <span class="hljs-comment"># Exclude email from the DN</span>
-<span class="hljs-attr">name_opt</span>          = ca_default                           <span class="hljs-comment"># Formatting options for names</span>
-<span class="hljs-attr">cert_opt</span>          = ca_default                           <span class="hljs-comment"># Certificate output options</span>
-<span class="hljs-attr">policy</span>            = policy_strict                        <span class="hljs-comment"># Certificate policy</span>
-<span class="hljs-attr">unique_subject</span>    = no                                   <span class="hljs-comment"># Allow multiple certs with the same DN</span>
+2.The certificates for mTLS?
 
-[ policy_strict ]                                        <span class="hljs-comment"># Policy for stricter validation</span>
-<span class="hljs-attr">countryName</span>             = match                          <span class="hljs-comment"># Must match the issuer's country</span>
-<span class="hljs-attr">stateOrProvinceName</span>     = match                          <span class="hljs-comment"># Must match the issuer's state</span>
-<span class="hljs-attr">organizationName</span>        = match                          <span class="hljs-comment"># Must match the issuer's organization</span>
-<span class="hljs-attr">organizationalUnitName</span>  = optional                       <span class="hljs-comment"># Organizational unit is optional</span>
-<span class="hljs-attr">commonName</span>              = supplied                       <span class="hljs-comment"># Must provide a common name</span>
-<span class="hljs-attr">emailAddress</span>            = optional                       <span class="hljs-comment"># Email address is optional</span>
+3.Create OpenSSL Root CA
 
-[ req ]                                                  <span class="hljs-comment"># Request settings</span>
-<span class="hljs-attr">default_bits</span>        = <span class="hljs-number">2048</span>                               <span class="hljs-comment"># Default key size</span>
-<span class="hljs-attr">distinguished_name</span>  = req_distinguished_name             <span class="hljs-comment"># Default DN template</span>
-<span class="hljs-attr">string_mask</span>         = utf8only                           <span class="hljs-comment"># UTF-8 encoding</span>
-<span class="hljs-attr">default_md</span>          = sha256                             <span class="hljs-comment"># Default message digest</span>
-<span class="hljs-attr">prompt</span>              = no                                 <span class="hljs-comment"># Non-interactive mode</span>
+4.Generate the root CA Certificate
 
-[ req_distinguished_name ]                               <span class="hljs-comment"># Template for the DN in the CSR</span>
-<span class="hljs-attr">countryName</span>                     = Country Name (<span class="hljs-number">2</span> letter code)
-<span class="hljs-attr">stateOrProvinceName</span>             = State <span class="hljs-literal">or</span> Province Name (full name)
-<span class="hljs-attr">localityName</span>                    = Locality Name (city)
-<span class="hljs-number">0</span>.<span class="hljs-attr">organizationName</span>              = Organization Name (company)
-<span class="hljs-attr">organizationalUnitName</span>          = Organizational Unit Name (section)
-<span class="hljs-attr">commonName</span>                      = Common Name (your domain)
-<span class="hljs-attr">emailAddress</span>                    = Email Address
+5.Generate the intermediate CA key pair and certificate
 
-[ v3_ca ]                                           <span class="hljs-comment"># Root CA certificate extensions</span>
-<span class="hljs-attr">subjectKeyIdentifier</span> = hash                         <span class="hljs-comment"># Subject key identifier</span>
-<span class="hljs-attr">authorityKeyIdentifier</span> = keyid:always,issuer        <span class="hljs-comment"># Authority key identifier</span>
-<span class="hljs-attr">basicConstraints</span> = critical, CA:<span class="hljs-literal">true</span>                <span class="hljs-comment"># Basic constraints for a CA</span>
-<span class="hljs-attr">keyUsage</span> = critical, keyCertSign, cRLSign           <span class="hljs-comment"># Key usage for a CA</span>
+6.Generate and sign server certificate using Intermediate CA
 
-[ crl_ext ]                                         <span class="hljs-comment"># CRL extensions</span>
-<span class="hljs-attr">authorityKeyIdentifier</span> = keyid:always,issuer        <span class="hljs-comment"># Authority key identifier</span>
+7.Signing and Revoking a certificate using Intermediate CA
+
+8.Conclusion
+
+1.What is mTLS?
+mTLS is called mutual TLS or TLS mutual authentication.
+
+TLS is a protocol for encryption used when communicating over a network.
+
+TLS consists of PKI (Public Key Infrastructure) and X.509 certificates. X.509 is a standard certificate format and is used in TLS/SSL, which is the backbone of https. It is used not only online but also offline for electronic signatures and other purposes. X.509 consists of a public key and several identities (host name, organizational information, etc.), and is signed by itself or by a certificate authority.
+
+By default, TLS is only used by the client to verify the identity of the server, so the mechanism for the server to verify the client had to be implemented on the application side
+
+Therefore, mTLS has come to be used as a mechanism for server and client to authenticate each other in business applications that have higher security requirements than consumer web services.
+
+2.The certificates for mTLS?
+
+Azure Gateway require chain certificate Root CA and Intermediate certificate.
+
+Create root and intermediate certificates and then use these certificates to create certificate CA bundle in Linux.
+
+Root certificate and Intermediate certificate
+
+A certificate chain or certificate CA bundle is a sequence of certificates, where each certificate in the chain is signed by the subsequent certificate.
+The Root CA is the top level of certificate chain while intermediate CAs or Sub CAs are Certificate Authorities that issue off an intermediate root.
+Typically, the root CA does not sign server or client certificates directly.
+The root CA is only ever used to create one or more intermediate CAs, which are trusted by the root CA to sign certificates on their behalf
+It allows the root key to be kept offline and unused as much as possible, as any compromise of the root key is disastrous.
+An intermediate certificate authority (CA) is an entity that can sign certificates on behalf of the root CA.
+The root CA signs the intermediate certificate, forming a chain of trust.
+The purpose of using an intermediate CA is primarily for security.
+If the intermediate key is compromised, the root CA can revoke the intermediate certificate and create a new intermediate cryptographic pair.
+3.Create OpenSSL Root CA
+
+We will create a new directory structure /root/myCA/ to store our certificates.
+
+mkdir -p ~/myCA/rootCA/{certs,crl,newcerts,private,csr}
+mkdir -p ~/myCA/intermediateCA/{certs,crl,newcerts,private,csr}
+A serial file is used to keep track of the last serial number that was used to issue a certificate.
+
+echo 1000 > ~/myCA/rootCA/serial
+echo 1000 > ~/myCA/intermediateCA/serial
+The CRL number is a unique integer that is incremented each time a new Certificate Revocation List (CRL) is generated.
+
+touch ~/myCA/rootCA/index.txt
+touch ~/myCA/intermediateCA/index.txt
+Create openssl_root.cnf /etc/ssl folder
+
+[ ca ]                                                   # The default CA section
+default_ca = CA_default                                  # The default CA name
+
+[ CA_default ]                                           # Default settings for the CA
+dir               = /root/myCA/rootCA                    # CA directory
+certs             = $dir/certs                           # Certificates directory
+crl_dir           = $dir/crl                             # CRL directory
+new_certs_dir     = $dir/newcerts                        # New certificates directory
+database          = $dir/index.txt                       # Certificate index file
+serial            = $dir/serial                          # Serial number file
+RANDFILE          = $dir/private/.rand                   # Random number file
+private_key       = $dir/private/ca.key.pem              # Root CA private key
+certificate       = $dir/certs/ca.cert.pem               # Root CA certificate
+crl               = $dir/crl/ca.crl.pem                  # Root CA CRL
+crlnumber         = $dir/crlnumber                       # Root CA CRL number
+crl_extensions    = crl_ext                              # CRL extensions
+default_crl_days  = 30                                   # Default CRL validity days
+default_md        = sha256                               # Default message digest
+preserve          = no                                   # Preserve existing extensions
+email_in_dn       = no                                   # Exclude email from the DN
+name_opt          = ca_default                           # Formatting options for names
+cert_opt          = ca_default                           # Certificate output options
+policy            = policy_strict                        # Certificate policy
+unique_subject    = no                                   # Allow multiple certs with the same DN
+
+[ policy_strict ]                                        # Policy for stricter validation
+countryName             = match                          # Must match the issuer's country
+stateOrProvinceName     = match                          # Must match the issuer's state
+organizationName        = match                          # Must match the issuer's organization
+organizationalUnitName  = optional                       # Organizational unit is optional
+commonName              = supplied                       # Must provide a common name
+emailAddress            = optional                       # Email address is optional
+
+[ req ]                                                  # Request settings
+default_bits        = 2048                               # Default key size
+distinguished_name  = req_distinguished_name             # Default DN template
+string_mask         = utf8only                           # UTF-8 encoding
+default_md          = sha256                             # Default message digest
+prompt              = no                                 # Non-interactive mode
+
+[ req_distinguished_name ]                               # Template for the DN in the CSR
+countryName                     = Country Name (2 letter code)
+stateOrProvinceName             = State or Province Name (full name)
+localityName                    = Locality Name (city)
+0.organizationName              = Organization Name (company)
+organizationalUnitName          = Organizational Unit Name (section)
+commonName                      = Common Name (your domain)
+emailAddress                    = Email Address
+
+[ v3_ca ]                                           # Root CA certificate extensions
+subjectKeyIdentifier = hash                         # Subject key identifier
+authorityKeyIdentifier = keyid:always,issuer        # Authority key identifier
+basicConstraints = critical, CA:true                # Basic constraints for a CA
+keyUsage = critical, keyCertSign, cRLSign           # Key usage for a CA
+
+[ crl_ext ]                                         # CRL extensions
+authorityKeyIdentifier = keyid:always,issuer        # Authority key identifier
 
 [ v3_intermediate_ca ]
-<span class="hljs-attr">subjectKeyIdentifier</span> = hash
-<span class="hljs-attr">authorityKeyIdentifier</span> = keyid:always,issuer
-<span class="hljs-attr">basicConstraints</span> = critical, CA:<span class="hljs-literal">true</span>, pathlen:<span class="hljs-number">0</span>
-<span class="hljs-attr">keyUsage</span> = critical, digitalSignature, cRLSign, keyCertSign
-</code></pre><p>Create  openssl_intermediate.cnf   /etc/ssl folder</p>
-<pre><code>[ ca ]                           <span class="hljs-comment"># The default CA section</span>
-<span class="hljs-attr">default_ca</span> = CA_default          <span class="hljs-comment"># The default CA name</span>
+subjectKeyIdentifier = hash
+authorityKeyIdentifier = keyid:always,issuer
+basicConstraints = critical, CA:true, pathlen:0
+keyUsage = critical, digitalSignature, cRLSign, keyCertSign
+Create openssl_intermediate.cnf /etc/ssl folder
 
-[ CA_default ]                                           <span class="hljs-comment"># Default settings for the intermediate CA</span>
-<span class="hljs-attr">dir</span>               = /root/myCA/intermediateCA            <span class="hljs-comment"># Intermediate CA directory</span>
-<span class="hljs-attr">certs</span>             = $dir/certs                           <span class="hljs-comment"># Certificates directory</span>
-<span class="hljs-attr">crl_dir</span>           = $dir/crl                             <span class="hljs-comment"># CRL directory</span>
-<span class="hljs-attr">new_certs_dir</span>     = $dir/newcerts                        <span class="hljs-comment"># New certificates directory</span>
-<span class="hljs-attr">database</span>          = $dir/index.txt                       <span class="hljs-comment"># Certificate index file</span>
-<span class="hljs-attr">serial</span>            = $dir/serial                          <span class="hljs-comment"># Serial number file</span>
-<span class="hljs-attr">RANDFILE</span>          = $dir/private/.rand                   <span class="hljs-comment"># Random number file</span>
-<span class="hljs-attr">private_key</span>       = $dir/private/intermediate.key.pem    <span class="hljs-comment"># Intermediate CA private key</span>
-<span class="hljs-attr">certificate</span>       = $dir/certs/intermediate.cert.pem     <span class="hljs-comment"># Intermediate CA certificate</span>
-<span class="hljs-attr">crl</span>               = $dir/crl/intermediate.crl.pem        <span class="hljs-comment"># Intermediate CA CRL</span>
-<span class="hljs-attr">crlnumber</span>         = $dir/crlnumber                       <span class="hljs-comment"># Intermediate CA CRL number</span>
-<span class="hljs-attr">crl_extensions</span>    = crl_ext                              <span class="hljs-comment"># CRL extensions</span>
-<span class="hljs-attr">default_crl_days</span>  = <span class="hljs-number">30</span>                                   <span class="hljs-comment"># Default CRL validity days</span>
-<span class="hljs-attr">default_md</span>        = sha256                               <span class="hljs-comment"># Default message digest</span>
-<span class="hljs-attr">preserve</span>          = no                                   <span class="hljs-comment"># Preserve existing extensions</span>
-<span class="hljs-attr">email_in_dn</span>       = no                                   <span class="hljs-comment"># Exclude email from the DN</span>
-<span class="hljs-attr">name_opt</span>          = ca_default                           <span class="hljs-comment"># Formatting options for names</span>
-<span class="hljs-attr">cert_opt</span>          = ca_default                           <span class="hljs-comment"># Certificate output options</span>
-<span class="hljs-attr">policy</span>            = policy_loose                         <span class="hljs-comment"># Certificate policy</span>
+[ ca ]                           # The default CA section
+default_ca = CA_default          # The default CA name
 
-[ policy_loose ]                                         <span class="hljs-comment"># Policy for less strict validation</span>
-<span class="hljs-attr">countryName</span>             = optional                       <span class="hljs-comment"># Country is optional</span>
-<span class="hljs-attr">stateOrProvinceName</span>     = optional                       <span class="hljs-comment"># State or province is optional</span>
-<span class="hljs-attr">localityName</span>            = optional                       <span class="hljs-comment"># Locality is optional</span>
-<span class="hljs-attr">organizationName</span>        = optional                       <span class="hljs-comment"># Organization is optional</span>
-<span class="hljs-attr">organizationalUnitName</span>  = optional                       <span class="hljs-comment"># Organizational unit is optional</span>
-<span class="hljs-attr">commonName</span>              = supplied                       <span class="hljs-comment"># Must provide a common name</span>
-<span class="hljs-attr">emailAddress</span>            = optional                       <span class="hljs-comment"># Email address is optional</span>
+[ CA_default ]                                           # Default settings for the intermediate CA
+dir               = /root/myCA/intermediateCA            # Intermediate CA directory
+certs             = $dir/certs                           # Certificates directory
+crl_dir           = $dir/crl                             # CRL directory
+new_certs_dir     = $dir/newcerts                        # New certificates directory
+database          = $dir/index.txt                       # Certificate index file
+serial            = $dir/serial                          # Serial number file
+RANDFILE          = $dir/private/.rand                   # Random number file
+private_key       = $dir/private/intermediate.key.pem    # Intermediate CA private key
+certificate       = $dir/certs/intermediate.cert.pem     # Intermediate CA certificate
+crl               = $dir/crl/intermediate.crl.pem        # Intermediate CA CRL
+crlnumber         = $dir/crlnumber                       # Intermediate CA CRL number
+crl_extensions    = crl_ext                              # CRL extensions
+default_crl_days  = 30                                   # Default CRL validity days
+default_md        = sha256                               # Default message digest
+preserve          = no                                   # Preserve existing extensions
+email_in_dn       = no                                   # Exclude email from the DN
+name_opt          = ca_default                           # Formatting options for names
+cert_opt          = ca_default                           # Certificate output options
+policy            = policy_loose                         # Certificate policy
 
-[ req ]                                                  <span class="hljs-comment"># Request settings</span>
-<span class="hljs-attr">default_bits</span>        = <span class="hljs-number">2048</span>                               <span class="hljs-comment"># Default key size</span>
-<span class="hljs-attr">distinguished_name</span>  = req_distinguished_name             <span class="hljs-comment"># Default DN template</span>
-<span class="hljs-attr">string_mask</span>         = utf8only                           <span class="hljs-comment"># UTF-8 encoding</span>
-<span class="hljs-attr">default_md</span>          = sha256                             <span class="hljs-comment"># Default message digest</span>
-<span class="hljs-attr">x509_extensions</span>     = v3_intermediate_ca                 <span class="hljs-comment"># Extensions for intermediate CA certificate</span>
+[ policy_loose ]                                         # Policy for less strict validation
+countryName             = optional                       # Country is optional
+stateOrProvinceName     = optional                       # State or province is optional
+localityName            = optional                       # Locality is optional
+organizationName        = optional                       # Organization is optional
+organizationalUnitName  = optional                       # Organizational unit is optional
+commonName              = supplied                       # Must provide a common name
+emailAddress            = optional                       # Email address is optional
 
-[ req_distinguished_name ]                               <span class="hljs-comment"># Template for the DN in the CSR</span>
-<span class="hljs-attr">countryName</span>                     = Country Name (<span class="hljs-number">2</span> letter code)
-<span class="hljs-attr">stateOrProvinceName</span>             = State <span class="hljs-literal">or</span> Province Name
-<span class="hljs-attr">localityName</span>                    = Locality Name
-<span class="hljs-number">0</span>.<span class="hljs-attr">organizationName</span>              = Organization Name
-<span class="hljs-attr">organizationalUnitName</span>          = Organizational Unit Name
-<span class="hljs-attr">commonName</span>                      = Common Name
-<span class="hljs-attr">emailAddress</span>                    = Email Address
+[ req ]                                                  # Request settings
+default_bits        = 2048                               # Default key size
+distinguished_name  = req_distinguished_name             # Default DN template
+string_mask         = utf8only                           # UTF-8 encoding
+default_md          = sha256                             # Default message digest
+x509_extensions     = v3_intermediate_ca                 # Extensions for intermediate CA certificate
 
-[ v3_intermediate_ca ]                                      <span class="hljs-comment"># Intermediate CA certificate extensions</span>
-<span class="hljs-attr">subjectKeyIdentifier</span> = hash                                 <span class="hljs-comment"># Subject key identifier</span>
-<span class="hljs-attr">authorityKeyIdentifier</span> = keyid:always,issuer                <span class="hljs-comment"># Authority key identifier</span>
-<span class="hljs-attr">basicConstraints</span> = critical, CA:<span class="hljs-literal">true</span>, pathlen:<span class="hljs-number">0</span>             <span class="hljs-comment"># Basic constraints for a CA</span>
-<span class="hljs-attr">keyUsage</span> = critical, digitalSignature, cRLSign, keyCertSign <span class="hljs-comment"># Key usage for a CA</span>
+[ req_distinguished_name ]                               # Template for the DN in the CSR
+countryName                     = Country Name (2 letter code)
+stateOrProvinceName             = State or Province Name
+localityName                    = Locality Name
+0.organizationName              = Organization Name
+organizationalUnitName          = Organizational Unit Name
+commonName                      = Common Name
+emailAddress                    = Email Address
 
-[ crl_ext ]                                                 <span class="hljs-comment"># CRL extensions</span>
-<span class="hljs-attr">authorityKeyIdentifier=keyid:always</span>                         <span class="hljs-comment"># Authority key identifier</span>
+[ v3_intermediate_ca ]                                      # Intermediate CA certificate extensions
+subjectKeyIdentifier = hash                                 # Subject key identifier
+authorityKeyIdentifier = keyid:always,issuer                # Authority key identifier
+basicConstraints = critical, CA:true, pathlen:0             # Basic constraints for a CA
+keyUsage = critical, digitalSignature, cRLSign, keyCertSign # Key usage for a CA
 
-[ server_cert ]                                             <span class="hljs-comment"># Server certificate extensions</span>
-<span class="hljs-attr">basicConstraints</span> = CA:FALSE                                 <span class="hljs-comment"># Not a CA certificate</span>
-<span class="hljs-attr">nsCertType</span> = server                                         <span class="hljs-comment"># Server certificate type</span>
-<span class="hljs-attr">keyUsage</span> = critical, digitalSignature, keyEncipherment      <span class="hljs-comment"># Key usage for a server cert</span>
-<span class="hljs-attr">extendedKeyUsage</span> = serverAuth                               <span class="hljs-comment"># Extended key usage for server authentication purposes (e.g., TLS/SSL servers).</span>
-<span class="hljs-attr">authorityKeyIdentifier</span> = keyid,issuer                       <span class="hljs-comment"># Authority key identifier linking the certificate to the issuer's public key.</span>
-</code></pre><p><strong>4.Generate the root CA Certificate</strong></p>
-<pre><code>openssl genrsa -out ~/myCA/rootCA/private/ca<span class="hljs-selector-class">.key</span><span class="hljs-selector-class">.pem</span> <span class="hljs-number">4096</span>
-chmod <span class="hljs-number">400</span> ~/myCA/rootCA/private/ca<span class="hljs-selector-class">.key</span><span class="hljs-selector-class">.pem</span>
-</code></pre><p>View the content of key</p>
-<pre><code>openssl rsa -noout -text -<span class="hljs-keyword">in</span> ~/myCA/rootCA/private/ca<span class="hljs-selector-class">.key</span><span class="hljs-selector-class">.pem</span>
-</code></pre><p>Create Root Certificate Authority Certificate cacert.pem. </p>
-<pre><code>openssl req -config openssl_root<span class="hljs-selector-class">.cnf</span> -key ~/myCA/rootCA/private/ca<span class="hljs-selector-class">.key</span><span class="hljs-selector-class">.pem</span> -new -x509 -days <span class="hljs-number">7300</span> -sha256 -extensions v3_ca -out ~/myCA/rootCA/certs/ca<span class="hljs-selector-class">.cert</span><span class="hljs-selector-class">.pem</span> -subj <span class="hljs-string">"/C=US/ST=California/L=San Francisco/O=Example Corp/OU=IT Department/CN=Root CA"</span>
-</code></pre><p>The CA certificate can be world readable so that it can be used to sign the cert by anyone.</p>
-<pre><code>chmod <span class="hljs-number">444</span> ~/myCA/rootCA/certs/ca<span class="hljs-selector-class">.cert</span><span class="hljs-selector-class">.pem</span>
-</code></pre><p>Verify root CA certificate</p>
-<pre><code>openssl x509 -noout -text -<span class="hljs-keyword">in</span> ~/myCA/rootCA/certs/ca<span class="hljs-selector-class">.cert</span><span class="hljs-selector-class">.pem</span>
-</code></pre><p><strong>5.Generate the intermediate CA key pair and certificate</strong></p>
-<p>Create an RSA key pair for the intermediate CA without a password and secure the file by removing permissions to groups and others</p>
-<pre><code>openssl genrsa -out ~/myCA/intermediateCA/private/intermediate<span class="hljs-selector-class">.key</span><span class="hljs-selector-class">.pem</span> <span class="hljs-number">4096</span>
-chmod <span class="hljs-number">400</span> ~/myCA/intermediateCA/private/intermediate<span class="hljs-selector-class">.key</span><span class="hljs-selector-class">.pem</span>
-</code></pre><p>Create the intermediate CA certificate signing request CSR</p>
-<pre><code>openssl req -config openssl_intermediate<span class="hljs-selector-class">.cnf</span> -key ~/myCA/intermediateCA/private/intermediate<span class="hljs-selector-class">.key</span><span class="hljs-selector-class">.pem</span> -new -sha256 -out ~/myCA/intermediateCA/certs/intermediate<span class="hljs-selector-class">.csr</span><span class="hljs-selector-class">.pem</span> -subj <span class="hljs-string">"/C=US/ST=California/L=San Francisco/O=Example Corp/OU=IT Department/CN=Intermediate CA"</span>
-</code></pre><p>Sign the intermediate CSR with the root CA key</p>
-<pre><code>openssl ca -config openssl_root<span class="hljs-selector-class">.cnf</span> -extensions v3_intermediate_ca -days <span class="hljs-number">3650</span> -notext -md sha256 -<span class="hljs-keyword">in</span> ~/myCA/intermediateCA/certs/intermediate<span class="hljs-selector-class">.csr</span><span class="hljs-selector-class">.pem</span> -out ~/myCA/intermediateCA/certs/intermediate<span class="hljs-selector-class">.cert</span><span class="hljs-selector-class">.pem</span>
-</code></pre><p>Assign 444 permission to the cert to make it readable by everyone:</p>
-<pre><code>chmod <span class="hljs-number">444</span> ~/myCA/intermediateCA/certs/intermediate<span class="hljs-selector-class">.cert</span><span class="hljs-selector-class">.pem</span>
-</code></pre><p>Check the index.txt file where the OpenSSL ca tool stores the certificate database</p>
-<pre><code> <span class="hljs-keyword">cat</span> ~/myCA/rootCA/<span class="hljs-built_in">index</span>.txt
-</code></pre><p>Verify the Intermediate CA Certificate content</p>
-<pre><code>openssl x509 -noout -text -<span class="hljs-keyword">in</span> ~/myCA/intermediateCA/certs/intermediate<span class="hljs-selector-class">.cert</span><span class="hljs-selector-class">.pem</span>
-</code></pre><p>Verify intermediate certificate against the root certificate.</p>
-<pre><code>openssl verify -CAfile ~/myCA/rootCA/certs/ca<span class="hljs-selector-class">.cert</span><span class="hljs-selector-class">.pem</span> ~/myCA/intermediateCA/certs/intermediate<span class="hljs-selector-class">.cert</span><span class="hljs-selector-class">.pem</span>
-</code></pre><p>Generate OpenSSL Create Certificate Chain (Certificate Bundle)</p>
-<p>Create certificate chain (certificate bundle), concatenate the intermediate and root certificates together.</p>
-<pre><code>cat ~/myCA/intermediateCA/certs/intermediate<span class="hljs-selector-class">.cert</span><span class="hljs-selector-class">.pem</span> ~/myCA/rootCA/certs/ca<span class="hljs-selector-class">.cert</span><span class="hljs-selector-class">.pem</span> &gt; ~/myCA/intermediateCA/certs/ca-chain<span class="hljs-selector-class">.cert</span><span class="hljs-selector-class">.pem</span>
-</code></pre><p>Verify certificate chain </p>
-<pre><code>openssl verify -CAfile ~/myCA/intermediateCA/certs/ca-chain<span class="hljs-selector-class">.cert</span><span class="hljs-selector-class">.pem</span> ~/myCA/intermediateCA/certs/intermediate<span class="hljs-selector-class">.cert</span><span class="hljs-selector-class">.pem</span>
-</code></pre><p><strong>6.Generate and sign server certificate using Intermediate CA</strong></p>
-<pre><code>openssl genpkey -algorithm RSA -out ~/myCA/intermediateCA/private/www<span class="hljs-selector-class">.example</span><span class="hljs-selector-class">.com</span><span class="hljs-selector-class">.key</span><span class="hljs-selector-class">.pem</span>
-chmod <span class="hljs-number">400</span> ~/myCA/intermediateCA/private/www<span class="hljs-selector-class">.example</span><span class="hljs-selector-class">.com</span><span class="hljs-selector-class">.key</span><span class="hljs-selector-class">.pem</span>
-</code></pre><p>Create a certificate signing request (CSR) for the server</p>
-<pre><code>openssl req -config ~/myCA/openssl_intermediate<span class="hljs-selector-class">.cnf</span> -key ~/myCA/intermediateCA/private/www<span class="hljs-selector-class">.example</span><span class="hljs-selector-class">.com</span><span class="hljs-selector-class">.key</span><span class="hljs-selector-class">.pem</span> -new -sha256 -out ~/myCA/intermediateCA/csr/www<span class="hljs-selector-class">.example</span><span class="hljs-selector-class">.com</span><span class="hljs-selector-class">.csr</span><span class="hljs-selector-class">.pem</span>
-</code></pre><p>You can automate the certificate signing request (CSR) creation by supplying default answers in the openssl.cnf (or openssl_intermediate.cnf in this case) file, under the [ req_distinguished_name ] section.</p>
-<pre><code>[ req<span class="hljs-number">_</span>distinguished<span class="hljs-number">_n</span>ame ]
-countryName<span class="hljs-number">_</span><span class="hljs-keyword">default</span> = US
-stateOrProvinceName<span class="hljs-number">_</span><span class="hljs-keyword">default</span> = California
-localityName<span class="hljs-number">_</span><span class="hljs-keyword">default</span> = San Francisco
-<span class="hljs-number">0</span>.organizationName<span class="hljs-number">_</span><span class="hljs-keyword">default</span> = Example Corp
-organizationalUnitName<span class="hljs-number">_</span><span class="hljs-keyword">default</span> = IT Department
-commonName<span class="hljs-number">_</span><span class="hljs-keyword">default</span> = www.example.com
-emailAddress<span class="hljs-number">_</span><span class="hljs-keyword">default</span> = certs<span class="hljs-meta">@example</span>.com
-</code></pre><p>Use the -batch option with openssl req command to automatically use these defaults without prompting for them</p>
-<pre><code>openssl req -config /etc/ssl/openssl_intermediate<span class="hljs-selector-class">.cnf</span> -key ~/myCA/intermediateCA/private/www<span class="hljs-selector-class">.example</span><span class="hljs-selector-class">.com</span><span class="hljs-selector-class">.key</span><span class="hljs-selector-class">.pem</span> -new -sha256 -out ~/myCA/intermediateCA/csr/www<span class="hljs-selector-class">.example</span><span class="hljs-selector-class">.com</span><span class="hljs-selector-class">.csr</span><span class="hljs-selector-class">.pem</span> -batch
-</code></pre><p>Sign the server CSR with the intermediate CA.</p>
-<pre><code>openssl ca -config /etc/ssl/openssl_intermediate<span class="hljs-selector-class">.cnf</span> -extensions server_cert -days <span class="hljs-number">375</span> -notext -md sha256 -<span class="hljs-keyword">in</span> ~/myCA/intermediateCA/csr/www<span class="hljs-selector-class">.example</span><span class="hljs-selector-class">.com</span><span class="hljs-selector-class">.csr</span><span class="hljs-selector-class">.pem</span> -out ~/myCA/intermediateCA/certs/www<span class="hljs-selector-class">.example</span><span class="hljs-selector-class">.com</span><span class="hljs-selector-class">.cert</span><span class="hljs-selector-class">.pem</span>
-</code></pre><p>Verify the server certificate.</p>
-<pre><code>openssl x509 -noout -text -<span class="hljs-keyword">in</span> ~/myCA/intermediateCA/certs/www<span class="hljs-selector-class">.example</span><span class="hljs-selector-class">.com</span><span class="hljs-selector-class">.cert</span><span class="hljs-selector-class">.pem</span>
-</code></pre><p><strong>7.Signing and Revoking a certificate using Intermediate CA</strong></p>
-<p>Revoking a certificate is the process of invalidating a previously issued SSL/TLS certificate before its expiration date. A certificate may need to be revoked for various reasons, such as:</p>
-<ul>
-<li>The private key associated with the certificate has been compromised.</li>
-<li>The certificate was issued fraudulently.</li>
-<li>The information in the certificate has changed, and it no longer accurately represents the subject.</li>
-</ul>
-<p>You have generated certificates under /certs folder and signed it using my intermediate CA.</p>
-<pre><code><span class="hljs-keyword">cat</span> ~/myCA/intermediateCA/<span class="hljs-built_in">index</span>.txt
-</code></pre><pre><code> cat <span class="hljs-regexp">~/myCA/</span>intermediateCA/serial
- ls -l <span class="hljs-regexp">/certs/</span>
-</code></pre><p>Revoke the certificate using the openssl ca command with the -revoke option</p>
-<pre><code>openssl ca -config ~/myCA/openssl_intermediate<span class="hljs-selector-class">.cnf</span> -revoke /certs/server<span class="hljs-selector-class">.cert</span><span class="hljs-selector-class">.pem</span>
-</code></pre><p>After revoking the certificate, update the Certificate Revocation List (CRL) to include the newly revoked certificate. The CRL is a list of revoked certificates that clients can check to determine if a certificate is still valid.</p>
-<pre><code>openssl ca -config ~/myCA/openssl_intermediate<span class="hljs-selector-class">.cnf</span> -gencrl -out ~/myCA/intermediateCA/crl/intermediate<span class="hljs-selector-class">.crl</span><span class="hljs-selector-class">.pem</span>
-</code></pre><p>The fields indicate the certificate&#39;s status (R for revoked), revocation date, expiration date, serial number, and subject information.</p>
-<pre><code><span class="hljs-keyword">cat</span> ~/myCA/intermediateCA/<span class="hljs-built_in">index</span>.txt
-</code></pre><p>The <code>crlnumber</code> file contentrepresents the current CRL number, which is incremented each time a new Certificate Revocation List is generated.</p>
-<pre><code> <span class="hljs-built_in">cat</span> intermediateCA/crlnumber
-</code></pre><p>To get the list of revoked certificates from intermediate CA</p>
-<pre><code>openssl crl -<span class="hljs-keyword">in</span> ~/myCA/intermediateCA/crl/intermediate<span class="hljs-selector-class">.crl</span><span class="hljs-selector-class">.pem</span> -text -noout
-</code></pre><p><strong>8.Conclusion</strong></p>
-<p>In this guide, we walked through the process of creating a certificate chain using OpenSSL. The certificate chain is an essential component of Public Key Infrastructure (PKI), which allows secure communication between clients and servers over the internet. We covered the following topics.</p>
-<pre><code><span class="hljs-comment">*  Setting up a directory structure for the Root and Intermediate Certificate Authorities (CAs).</span>
-<span class="hljs-comment">*  Creating configuration files (openssl.cnf) for the Root and Intermediate CAs.</span>
-<span class="hljs-comment">*  Generating a Root CA private key and self-signed certificate.</span>
-<span class="hljs-comment">*  Generating an Intermediate CA private key and Certificate Signing Request (CSR).</span>
-<span class="hljs-comment">*  Signing the Intermediate CA's CSR with the Root CA, resulting in the Intermediate CA certificate.</span>
-<span class="hljs-comment">*  Creating a Certificate Authority Bundle, which includes the Root and Intermediate CA certificates.</span>
-<span class="hljs-comment">*  Generating a server private key and CSR.</span>
-<span class="hljs-comment">*  Signing the server's CSR with the Intermediate CA, resulting in the server certificate.</span>
-<span class="hljs-comment">*  Revoking a server certificate, updating the Certificate Revocation List (CRL), and managing the CRL numbers.</span>
-</code></pre><p>By following these steps, you can establish a secure and trustworthy certificate chain for your web services, allowing clients to verify the authenticity of your server and communicate securely.</p>
+[ crl_ext ]                                                 # CRL extensions
+authorityKeyIdentifier=keyid:always                         # Authority key identifier
+
+[ server_cert ]                                             # Server certificate extensions
+basicConstraints = CA:FALSE                                 # Not a CA certificate
+nsCertType = server                                         # Server certificate type
+keyUsage = critical, digitalSignature, keyEncipherment      # Key usage for a server cert
+extendedKeyUsage = serverAuth                               # Extended key usage for server authentication purposes (e.g., TLS/SSL servers).
+authorityKeyIdentifier = keyid,issuer                       # Authority key identifier linking the certificate to the issuer's public key.
+4.Generate the root CA Certificate
+
+openssl genrsa -out ~/myCA/rootCA/private/ca.key.pem 4096
+chmod 400 ~/myCA/rootCA/private/ca.key.pem
+View the content of key
+
+openssl rsa -noout -text -in ~/myCA/rootCA/private/ca.key.pem
+Create Root Certificate Authority Certificate cacert.pem.
+
+openssl req -config openssl_root.cnf -key ~/myCA/rootCA/private/ca.key.pem -new -x509 -days 7300 -sha256 -extensions v3_ca -out ~/myCA/rootCA/certs/ca.cert.pem -subj "/C=US/ST=California/L=San Francisco/O=Example Corp/OU=IT Department/CN=Root CA"
+The CA certificate can be world readable so that it can be used to sign the cert by anyone.
+
+chmod 444 ~/myCA/rootCA/certs/ca.cert.pem
+Verify root CA certificate
+
+openssl x509 -noout -text -in ~/myCA/rootCA/certs/ca.cert.pem
+5.Generate the intermediate CA key pair and certificate
+
+Create an RSA key pair for the intermediate CA without a password and secure the file by removing permissions to groups and others
+
+openssl genrsa -out ~/myCA/intermediateCA/private/intermediate.key.pem 4096
+chmod 400 ~/myCA/intermediateCA/private/intermediate.key.pem
+Create the intermediate CA certificate signing request CSR
+
+openssl req -config openssl_intermediate.cnf -key ~/myCA/intermediateCA/private/intermediate.key.pem -new -sha256 -out ~/myCA/intermediateCA/certs/intermediate.csr.pem -subj "/C=US/ST=California/L=San Francisco/O=Example Corp/OU=IT Department/CN=Intermediate CA"
+Sign the intermediate CSR with the root CA key
+
+openssl ca -config openssl_root.cnf -extensions v3_intermediate_ca -days 3650 -notext -md sha256 -in ~/myCA/intermediateCA/certs/intermediate.csr.pem -out ~/myCA/intermediateCA/certs/intermediate.cert.pem
+Assign 444 permission to the cert to make it readable by everyone:
+
+chmod 444 ~/myCA/intermediateCA/certs/intermediate.cert.pem
+Check the index.txt file where the OpenSSL ca tool stores the certificate database
+
+ cat ~/myCA/rootCA/index.txt
+Verify the Intermediate CA Certificate content
+
+openssl x509 -noout -text -in ~/myCA/intermediateCA/certs/intermediate.cert.pem
+Verify intermediate certificate against the root certificate.
+
+openssl verify -CAfile ~/myCA/rootCA/certs/ca.cert.pem ~/myCA/intermediateCA/certs/intermediate.cert.pem
+Generate OpenSSL Create Certificate Chain (Certificate Bundle)
+
+Create certificate chain (certificate bundle), concatenate the intermediate and root certificates together.
+
+cat ~/myCA/intermediateCA/certs/intermediate.cert.pem ~/myCA/rootCA/certs/ca.cert.pem > ~/myCA/intermediateCA/certs/ca-chain.cert.pem
+Verify certificate chain
+
+openssl verify -CAfile ~/myCA/intermediateCA/certs/ca-chain.cert.pem ~/myCA/intermediateCA/certs/intermediate.cert.pem
+6.Generate and sign server certificate using Intermediate CA
+
+openssl genpkey -algorithm RSA -out ~/myCA/intermediateCA/private/www.example.com.key.pem
+chmod 400 ~/myCA/intermediateCA/private/www.example.com.key.pem
+Create a certificate signing request (CSR) for the server
+
+openssl req -config ~/myCA/openssl_intermediate.cnf -key ~/myCA/intermediateCA/private/www.example.com.key.pem -new -sha256 -out ~/myCA/intermediateCA/csr/www.example.com.csr.pem
+You can automate the certificate signing request (CSR) creation by supplying default answers in the openssl.cnf (or openssl_intermediate.cnf in this case) file, under the [ req_distinguished_name ] section.
+
+[ req_distinguished_name ]
+countryName_default = US
+stateOrProvinceName_default = California
+localityName_default = San Francisco
+0.organizationName_default = Example Corp
+organizationalUnitName_default = IT Department
+commonName_default = www.example.com
+emailAddress_default = certs@example.com
+Use the -batch option with openssl req command to automatically use these defaults without prompting for them
+
+openssl req -config /etc/ssl/openssl_intermediate.cnf -key ~/myCA/intermediateCA/private/www.example.com.key.pem -new -sha256 -out ~/myCA/intermediateCA/csr/www.example.com.csr.pem -batch
+Sign the server CSR with the intermediate CA.
+
+openssl ca -config /etc/ssl/openssl_intermediate.cnf -extensions server_cert -days 375 -notext -md sha256 -in ~/myCA/intermediateCA/csr/www.example.com.csr.pem -out ~/myCA/intermediateCA/certs/www.example.com.cert.pem
+Verify the server certificate.
+
+openssl x509 -noout -text -in ~/myCA/intermediateCA/certs/www.example.com.cert.pem
+7.Signing and Revoking a certificate using Intermediate CA
+
+Revoking a certificate is the process of invalidating a previously issued SSL/TLS certificate before its expiration date. A certificate may need to be revoked for various reasons, such as:
+
+The private key associated with the certificate has been compromised.
+The certificate was issued fraudulently.
+The information in the certificate has changed, and it no longer accurately represents the subject.
+You have generated certificates under /certs folder and signed it using my intermediate CA.
+
+cat ~/myCA/intermediateCA/index.txt
+ cat ~/myCA/intermediateCA/serial
+ ls -l /certs/
+Revoke the certificate using the openssl ca command with the -revoke option
+
+openssl ca -config ~/myCA/openssl_intermediate.cnf -revoke /certs/server.cert.pem
+After revoking the certificate, update the Certificate Revocation List (CRL) to include the newly revoked certificate. The CRL is a list of revoked certificates that clients can check to determine if a certificate is still valid.
+
+openssl ca -config ~/myCA/openssl_intermediate.cnf -gencrl -out ~/myCA/intermediateCA/crl/intermediate.crl.pem
+The fields indicate the certificate's status (R for revoked), revocation date, expiration date, serial number, and subject information.
+
+cat ~/myCA/intermediateCA/index.txt
+The crlnumber file contentrepresents the current CRL number, which is incremented each time a new Certificate Revocation List is generated.
+
+ cat intermediateCA/crlnumber
+To get the list of revoked certificates from intermediate CA
+
+openssl crl -in ~/myCA/intermediateCA/crl/intermediate.crl.pem -text -noout
+8.Conclusion
+
+In this guide, we walked through the process of creating a certificate chain using OpenSSL. The certificate chain is an essential component of Public Key Infrastructure (PKI), which allows secure communication between clients and servers over the internet. We covered the following topics.
+
+*  Setting up a directory structure for the Root and Intermediate Certificate Authorities (CAs).
+*  Creating configuration files (openssl.cnf) for the Root and Intermediate CAs.
+*  Generating a Root CA private key and self-signed certificate.
+*  Generating an Intermediate CA private key and Certificate Signing Request (CSR).
+*  Signing the Intermediate CA's CSR with the Root CA, resulting in the Intermediate CA certificate.
+*  Creating a Certificate Authority Bundle, which includes the Root and Intermediate CA certificates.
+*  Generating a server private key and CSR.
+*  Signing the server's CSR with the Intermediate CA, resulting in the server certificate.
+*  Revoking a server certificate, updating the Certificate Revocation List (CRL), and managing the CRL numbers.
+By following these steps, you can establish a secure and trustworthy certificate chain for your web services, allowing clients to verify the authenticity of your server and communicate securely.
